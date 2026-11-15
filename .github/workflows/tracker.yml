@@ -1,0 +1,59 @@
+name: GitHub Projects Tracker
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - closed
+
+permissions:
+  issues: write
+  pull-requests: read
+
+jobs:
+  track-completed-issues:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check and close linked issues
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const body = context.payload.pull_request.body || "";
+            const pattern = /^\s*(?:closes|fixes|resolves)\s+#(\d+)\s*$/gim;
+
+            const numbers = new Set(
+              [...body.matchAll(pattern)].map(match => Number(match[1]))
+            );
+
+            if (numbers.size === 0) {
+              core.info("No closing reference found. Use Closes #1 on its own line.");
+              return;
+            }
+
+            for (const number of numbers) {
+              const params = {
+                ...context.repo,
+                issue_number: number
+              };
+
+              const { data: issue } = await github.rest.issues.get(params);
+
+              if (issue.pull_request) {
+                throw new Error("Expected an Issue, but found a PR: #" + number);
+              }
+
+              if (issue.state === "open") {
+                await github.rest.issues.update({
+                  ...params,
+                  state: "closed",
+                  state_reason: "completed"
+                });
+
+                core.info("Closed Issue #" + number);
+              } else {
+                core.info("Issue #" + number + " is already closed.");
+              }
+            }
